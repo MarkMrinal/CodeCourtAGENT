@@ -20,6 +20,7 @@ importlib.reload(core.court)
 importlib.reload(core.heusc_voice)
 importlib.reload(core.inspector)
 importlib.reload(core.state)
+importlib.reload(demo.fix_runner)
 
 from core.state import create_initial_state, set_findings
 from core.inspector import scan_directory, save_findings_to_json
@@ -601,45 +602,70 @@ with tab_demo:
         "**Vulnerability Discovery → Failed Test → Automated Patch → Verified Pass.**"
     )
 
+    demo_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demo")
+    snippet_path = os.path.join(demo_dir, "snippet.py")
+    test_path = os.path.join(demo_dir, "snippet_test.py")
+
+    if "guided_fix_result" not in st.session_state:
+        st.session_state.guided_fix_result = None
+
     col_d1, col_d2 = st.columns(2)
     with col_d1:
         st.subheader("Vulnerable Code (`demo/snippet.py`)")
         try:
-            with open("demo/snippet.py", "r") as f:
+            with open(snippet_path, "r", encoding="utf-8") as f:
                 st.code(f.read(), language="python")
-        except Exception:
-            st.write("File not found.")
+        except Exception as e:
+            st.warning(f"Could not load snippet.py: {e}")
 
     with col_d2:
         st.subheader("Security Test (`demo/snippet_test.py`)")
         try:
-            with open("demo/snippet_test.py", "r") as f:
+            with open(test_path, "r", encoding="utf-8") as f:
                 st.code(f.read(), language="python")
-        except Exception:
-            st.write("File not found.")
+        except Exception as e:
+            st.warning(f"Could not load snippet_test.py: {e}")
 
     st.markdown("---")
-    if st.button("🚀 Execute Guided Fix Walkthrough", type="primary", use_container_width=True):
+
+    col_b1, col_b2 = st.columns([3, 1])
+    with col_b1:
+        run_walkthrough = st.button("🚀 Execute Guided Fix Walkthrough", type="primary", use_container_width=True)
+    with col_b2:
+        if st.session_state.guided_fix_result:
+            if st.button("🔄 Reset Walkthrough", use_container_width=True):
+                st.session_state.guided_fix_result = None
+                st.rerun()
+
+    if run_walkthrough:
         with st.spinner("Executing end-to-end fix and verification..."):
-            res = execute_guided_fix()
-            
-            st.subheader("Verification Results")
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("### Step 1: Pre-Patch Test Run")
-                if not res["before"]["passed"]:
-                    st.error("❌ Test Failed as Expected (Vulnerability Proved)")
-                else:
-                    st.warning("⚠️ Test passed unexpectedly before patch")
-                st.code(res["before"]["stdout"] or res["before"]["stderr"], language="text")
+            try:
+                st.session_state.guided_fix_result = execute_guided_fix()
+            except Exception as e:
+                st.error(f"Guided fix execution error: {e}")
 
-            with c2:
-                st.markdown("### Step 2: Post-Patch Test Run")
-                if res["after"]["passed"]:
-                    st.success("✅ Test Passed! Vulnerability Remediated")
-                else:
-                    st.error("❌ Test still failed after patch")
-                st.code(res["after"]["stdout"] or res["after"]["stderr"], language="text")
+    res = st.session_state.guided_fix_result
+    if res:
+        st.markdown("---")
+        st.subheader("📊 Verification Results")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("#### Step 1: Pre-Patch Test Run")
+            if not res["before"]["passed"]:
+                st.error("❌ Test Failed as Expected (Vulnerability Proved)")
+            else:
+                st.warning("⚠️ Test passed unexpectedly before patch")
+            output_text = res["before"]["stdout"] or res["before"]["stderr"] or "(no output)"
+            st.code(output_text, language="text")
 
-            st.markdown("### Step 3: Patch Applied (Unified Diff)")
-            st.code(res["diff"], language="diff")
+        with c2:
+            st.markdown("#### Step 2: Post-Patch Test Run")
+            if res["after"]["passed"]:
+                st.success("✅ Test Passed! Vulnerability Remediated")
+            else:
+                st.error("❌ Test still failed after patch")
+            output_text = res["after"]["stdout"] or res["after"]["stderr"] or "(no output)"
+            st.code(output_text, language="text")
+
+        st.markdown("#### Step 3: Patch Applied (Unified Diff)")
+        st.code(res["diff"], language="diff")
