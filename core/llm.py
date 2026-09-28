@@ -12,7 +12,8 @@ import requests
 from typing import Optional, Tuple
 from dotenv import load_dotenv
 
-load_dotenv()
+# Ensure fresh reload of .env values on every run
+load_dotenv(override=True)
 
 DEFAULT_GEMINI_MODELS = [
     "gemini-flash-lite-latest",
@@ -24,6 +25,22 @@ _ACTIVE_PROVIDER: Optional[str] = "Gemini"
 _ACTIVE_MODEL: Optional[str] = DEFAULT_GEMINI_MODELS[0]
 
 _THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _get_secret(key: str, default: str = "") -> str:
+    """Retrieve configuration from .env or Streamlit Cloud Secrets."""
+    # Always reload dotenv in case the file was modified
+    load_dotenv(override=True)
+    val = os.getenv(key, "")
+    if val:
+        return val.strip()
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets") and key in st.secrets:
+            return str(st.secrets[key]).strip()
+    except Exception:
+        pass
+    return default
 
 
 def _strip_thinking(text: str) -> str:
@@ -42,9 +59,9 @@ def _call_gemini(
     temperature: float = 0.7,
     max_tokens: int = 2048,
 ) -> str:
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    api_key = _get_secret("GEMINI_API_KEY")
     if not api_key:
-        raise ValueError("GEMINI_API_KEY not configured in .env")
+        raise ValueError("GEMINI_API_KEY not configured")
 
     models_to_try = [model] if model else DEFAULT_GEMINI_MODELS
     last_err = None
@@ -93,7 +110,7 @@ def _call_nvidia(
     max_tokens: int = 1024,
     timeout: int = 15,
 ) -> str:
-    base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/")
+    base_url = _get_secret("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/")
     url = f"{base_url}/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -125,9 +142,9 @@ def _call_groq(
     max_tokens: int = 800,
 ) -> str:
     from groq import Groq
-    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    api_key = _get_secret("GROQ_API_KEY")
     if not api_key:
-        raise ValueError("GROQ_API_KEY not configured in .env")
+        raise ValueError("GROQ_API_KEY not configured")
 
     client = Groq(api_key=api_key)
     messages = []
@@ -165,7 +182,7 @@ def ask(
     errors = []
 
     # ── 1. Gemini (Primary) ────────────────────────────────────────────────
-    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    gemini_key = _get_secret("GEMINI_API_KEY")
     if gemini_key:
         try:
             return _call_gemini(
@@ -179,8 +196,8 @@ def ask(
             errors.append(f"Gemini: {e}")
 
     # ── 2. NVIDIA Primary Key (Fallback 1) ─────────────────────────────────
-    nv_key = os.getenv("NVIDIA_API_KEY", "").strip()
-    nv_model = os.getenv("NVIDIA_MODEL", "z-ai/glm-5.3-flash").strip()
+    nv_key = _get_secret("NVIDIA_API_KEY")
+    nv_model = _get_secret("NVIDIA_MODEL", "z-ai/glm-5.3-flash")
     if nv_key:
         try:
             res = _call_nvidia(
@@ -200,7 +217,7 @@ def ask(
             errors.append(f"NVIDIA Primary: {e}")
 
     # ── 3. NVIDIA Backup Key (Fallback 2) ──────────────────────────────────
-    nv_backup_key = os.getenv("NVIDIA_API_KEY_BACKUP", "").strip()
+    nv_backup_key = _get_secret("NVIDIA_API_KEY_BACKUP")
     if nv_backup_key:
         try:
             res = _call_nvidia(
@@ -219,7 +236,7 @@ def ask(
             errors.append(f"NVIDIA Backup: {e}")
 
     # ── 4. Groq (Last option) ──────────────────────────────────────────────
-    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    groq_key = _get_secret("GROQ_API_KEY")
     if groq_key:
         try:
             return _call_groq(

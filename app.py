@@ -12,8 +12,10 @@ import core.state
 import core.inspector
 import core.heusc_voice
 import core.court
+import core.llm
 import demo.fix_runner
 
+importlib.reload(core.llm)
 importlib.reload(core.court)
 importlib.reload(core.heusc_voice)
 importlib.reload(core.inspector)
@@ -23,9 +25,10 @@ from core.state import create_initial_state, set_findings
 from core.inspector import scan_directory, save_findings_to_json
 from core.heusc_voice import speak_as_heusc, generate_scan_briefing
 from core.court import conduct_debate
+from core.llm import get_active_provider_info
 from demo.fix_runner import execute_guided_fix, get_diff
 
-load_dotenv()
+load_dotenv(override=True)
 
 # Streamlit Page Config
 st.set_page_config(
@@ -238,18 +241,33 @@ with st.sidebar:
     st.title("⚖️ CodeCourt")
     st.caption("Evidence-grounded code intelligence")
     
-    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    def get_secret(key: str, default: str = "") -> str:
+        val = os.getenv(key, "")
+        if val:
+            return val.strip()
+        try:
+            if hasattr(st, "secrets") and key in st.secrets:
+                return str(st.secrets[key]).strip()
+        except Exception:
+            pass
+        return default
+
+    gemini_key = get_secret("GEMINI_API_KEY")
     gemini_active = bool(gemini_key and not gemini_key.startswith("AQ.your_"))
-    groq_key = os.getenv("GROQ_API_KEY", "")
+    nv_key = get_secret("NVIDIA_API_KEY")
+    nv_active = bool(nv_key and not nv_key.startswith("nvapi-your_"))
+    groq_key = get_secret("GROQ_API_KEY")
     groq_active = bool(groq_key and not groq_key.startswith("gsk_your_"))
-    
+
     if gemini_active:
-        st.success("🟢 Google Gemini: Active\n(`gemini-flash-lite-latest`)")
+        st.success("🟢 Google Gemini: Active (Primary)\n`gemini-flash-lite-latest`")
+    elif nv_active:
+        st.success("🟢 NVIDIA NIM: Active\n`z-ai/glm-5.3-flash`")
     elif groq_active:
-        st.success("🟢 Groq: Active\n(`qwen/qwen3.8-27b`)")
+        st.success("🟢 Groq: Active\n`qwen/qwen3.8-27b`")
     else:
-        st.warning("🟡 LLM API: Not configured in .env")
-        st.info("Add GEMINI_API_KEY or GROQ_API_KEY to `.env`.")
+        st.warning("🟡 LLM API: Not configured")
+        st.info("Add GEMINI_API_KEY, NVIDIA_API_KEY, or GROQ_API_KEY to `.env` or Secrets.")
 
     st.markdown("---")
     st.subheader("Session State")
